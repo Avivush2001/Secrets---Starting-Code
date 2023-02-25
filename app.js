@@ -7,7 +7,8 @@ const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const app = express();
 const _ = require("lodash")
-const md5 = require("md5")
+const bcrypt = require("bcrypt")
+const rounds = 10
 
 main().catch(err => console.log(err));
 
@@ -47,24 +48,28 @@ async function main() {
 
     // post setups
     app.post("/register", function(req, res) {
-        let newUser = new User({
-            email: req.body.username,
-            password: md5(req.body.password)
+        bcrypt.hash(req.body.password, rounds, function(err, hash) {
+            let newUser = new User({
+                email: req.body.username,
+                password: hash
+            })
+            newUser.save(function(err){if (err) console.log(err); else res.render("secrets")})
         })
-        newUser.save(function(err){if (err) console.log(err); else res.render("secrets")})
+
+        
     })
 
     app.post("/login", function(req, res) {
         const userName = req.body.username
-        const password = md5(req.body.password)
+        const password = req.body.password
         User.findOne({email: userName}, function(err, foundUser) {
             if (err) {
                 console.log(err)
             } else {
                 if (foundUser) {
-                    if (foundUser.password === password) {
-                        res.render("secrets")
-                    }
+                    bcrypt.compare(password, foundUser.password, function(err, result) {
+                        if (result) res.render('secrets')
+                    })
                 }
             }
         })
