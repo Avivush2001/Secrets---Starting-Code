@@ -37,8 +37,10 @@ async function main() {
     // user schema setup
     const userSchema = new mongoose.Schema({
         email: String,
+        username: String,
         password: String,
-        googleId: String
+        googleId: {type:String, unique: true},
+        secret: String
     })
     userSchema.plugin(passportLocalMongoose)
     userSchema.plugin(findOrCreate)
@@ -71,10 +73,10 @@ async function main() {
       clientID: process.env.CLIENT_ID,
       clientSecret: process.env.CLIENT_SECRET,
       callbackURL: "http://localhost:3000/auth/google/secrets",
-      userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo"
+      userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo",
     }, (acessToken, refreshToken, profile, cb) => {
       console.log(profile)
-      User.findOrCreate({ googleId: profile.id}, (err, user) => {
+      User.findOrCreate({ username: profile.id,googleId: profile.id}, (err, user) => {
         return cb(err, user)
       })
     }))
@@ -102,20 +104,38 @@ async function main() {
             'no-cache, private, no-store, must-revalidate, max-stal e=0, post-check=0, pre-check=0'
         );
         if (req.isAuthenticated()) {
-            res.render("secrets")
+          User.find({"secret": {$ne: null}}, function(err, foundUsers) {
+            if (err) console.log(err)
+            else {
+              if (foundUsers) {
+                res.render("secrets",{usersWithSecrets: foundUsers})
+              }
+            }
+          })
+            
         } else res.redirect("/login")
     })
 
     app.get("/logout", function(req, res) {
         req.logout(function(err) {console.log(err)})
-        res.redirect("/secrets")
+        res.redirect("/")
     })
 
-    app.get("/auth/google", passport.authenticate('google', {scope: ['email', 'profile']}));
+    app.get("/auth/google", passport.authenticate('google', {scope: ['email', 'profile'], prompt : "select_account"}));
 
     app.get("/auth/google/secrets", passport.authenticate('google', {failureRedirect: '/login'}),
     function(req, res) {
       res.redirect('/secrets')
+    })
+
+    app.get('/submit', function(req, res) {
+      res.set(
+        'Cache-Control', 
+        'no-cache, private, no-store, must-revalidate, max-stal e=0, post-check=0, pre-check=0'
+    );
+    if (req.isAuthenticated()) {
+        res.render("submit")
+    } else res.redirect("/login")
     })
 
     // post setups
@@ -168,7 +188,18 @@ async function main() {
           }
         });
       });
-
+    
+    app.post("/submit", function(req,res) {
+      const submittedSecret = req.body.secret
+      const userId = req.user.id
+      User.findById(userId, function(err, foundUser) {
+        if (err) console.log(err)
+        else {if (foundUser) {
+          foundUser.secret = submittedSecret
+          foundUser.save(function(){res.redirect("/secrets")})
+        }}
+      })
+    })
 
 
 
