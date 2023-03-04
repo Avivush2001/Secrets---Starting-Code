@@ -12,6 +12,9 @@ const passport = require("passport")
 const passportLocalMongoose = require("passport-local-mongoose")
 const GoogleStrategy = require('passport-google-oauth20').Strategy
 const findOrCreate = require('mongoose-findorcreate')
+const emailJS = require('@emailjs/browser')
+const flash = require('connect-flash')
+// const validator = require("node-email-validation")
 
 main().catch(err => console.log(err));
 
@@ -28,6 +31,20 @@ async function main() {
     }))
     app.use(passport.initialize())
     app.use(passport.session())
+    app.use(flash())
+
+    // emailJS setup
+    emailJS.init(process.env.EMAILJS_KEY)
+
+    // nodemailer setup
+    // const transport = nodemailer.createTransport({
+    //   service: "Yahoo",
+    //   auth: {
+    //     user: process.env.USER,
+    //     pass: process.env.PASS
+    //   },
+    // });
+
 
     // mongo setup
     await mongoose.connect('mongodb://127.0.0.1/userDB');
@@ -40,7 +57,15 @@ async function main() {
         username: String,
         password: String,
         googleId: {type:String, unique: true},
-        secret: String
+        secret: [String],
+        status: {
+          type: String, 
+          enum: ['Pending', 'Active'],
+          default: 'Pending'
+        },
+        confirmationCode: { 
+          type: String, 
+          unique: true }
     })
     userSchema.plugin(passportLocalMongoose)
     userSchema.plugin(findOrCreate)
@@ -87,7 +112,7 @@ async function main() {
     })
 
     app.get("/login", function(req, res) {
-        res.render("login")
+        res.render("login", { message: req.flash('message') })
     })
 
     app.get("/register", function(req, res) {
@@ -108,6 +133,7 @@ async function main() {
             if (err) console.log(err)
             else {
               if (foundUsers) {
+                
                 res.render("secrets",{usersWithSecrets: foundUsers})
               }
             }
@@ -137,19 +163,66 @@ async function main() {
         res.render("submit")
     } else res.redirect("/login")
     })
+    
+    app.get('/confirm/:code', (req, res) => {
+      const code = req.params.code
+      User.findOne({
+        confirmationCode: code
+      }, (err, foundUser) => {
+        if (err) return res.status(404).send({ message: "User Not found." })
+        else if (foundUser) {
+          foundUser.status = "Active"
+          foundUser.save(function(){res.redirect("/login")})
+        }
+      } )
+    })
 
     // post setups
     app.post("/register", function(req, res) {
-        User.register({username: req.body.username}, req.body.password, function(err, user) {
-            if (err) {
-                console.log(err)
-                res.redirect("/register")
-            } else {
-                passport.authenticate("local") (req, res, function()  {
-                    res.redirect("/secrets")
-                })
+      // email confirmation
+      // if (validator.is_email_valid(req.body.username)) {
+      //   const userParams = {
+      //     code: rand,
+      //     email: req.body.username
+      //   }
+      //   emailJS.send(process.env.EMAILJS_ID, process.env.EMAILJS_TEMPLATE, userParams).then(function(response) {
+      //     console.log('SUCCESS!', response.status, response.text)
+      //   }, function(error) {
+      //     console.log('FAILED...', error)
+      //   })
+      //   res.redirect("/confirmation")
+      // } else res.redirect("/register")
+      
+      const rand = Math.floor(Math.random() * 100000)
+      User.register({username: req.body.username, confirmationCode: rand}, req.body.password, function(err, user) {
+        if (err) {
+            console.log(err)
+            res.redirect("/register")
+        } else { 
+            const userParams = {
+              code: "localhost:3000/confirm/" + rand,
+              email: req.body.username
             }
-        })
+            emailJS.send(process.env.EMAILJS_ID, process.env.EMAILJS_TEMPLATE, userParams, process.env.EMAILJS_KEY).then(function(response) {
+              console.log('SUCCESS!', response.status, response.text)
+            }, function(error) {
+              console.log('FAILED...', error)
+            })
+          req.flash('message', 'check your email.');
+          res.redirect("/login")
+            
+        }
+      })
+        // User.register({username: req.body.username, confirmationCode: rand}, req.body.password, function(err, user) {
+        //     if (err) {
+        //         console.log(err)
+        //         res.redirect("/register")
+        //     } else {
+        //         passport.authenticate("local") (req, res, function()  {
+        //             res.redirect("/login")
+        //         })
+        //     }
+        // })
     })
     app.post("/login", function(req, res){
         //check the DB to see if the username that was used to login exists in the DB
@@ -157,6 +230,10 @@ async function main() {
           //if username is found in the database, create an object called "user" that will store the username and password
           //that was used to login
           if(foundUser){
+            if (foundUser.status != "Active") {
+              res.send({message:"Please verify"})
+              res.redirect("/login")
+            }
           const user = new User({
             username: req.body.username,
             password: req.body.password
@@ -195,7 +272,7 @@ async function main() {
       User.findById(userId, function(err, foundUser) {
         if (err) console.log(err)
         else {if (foundUser) {
-          foundUser.secret = submittedSecret
+          foundUser.secret.push(submittedSecret)
           foundUser.save(function(){res.redirect("/secrets")})
         }}
       })

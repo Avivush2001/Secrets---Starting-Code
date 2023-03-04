@@ -2,6 +2,9 @@
 
 <div class="container mt-5">
   <h1>Login</h1>
+  <% if (message) { %>
+    <div class="alert alert-info"><%= message %></div>
+  <% } %>
 
   <div class="row">
     <div class="col-sm-8">
